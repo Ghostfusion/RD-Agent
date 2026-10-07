@@ -137,7 +137,8 @@ Competition name/URL → DataScienceScen (LLM-written description, timeouts, met
 
 | Dependency | Why | Integration | Configured by | Failure mode |
 |---|---|---|---|---|
-| LLM provider (OpenAI/Azure/litellm) | all reasoning/codegen | `oai/backend/litellm.py` (`LiteLLMAPIBackend` default) | `LLM_SETTINGS` (env, no prefix): `CHAT_MODEL`, `OPENAI_API_KEY`, `BACKEND` | retry `max_retry=10`, then `APIBackend` raises; timer counts API fails |
+| LLM provider (OpenAI/Azure/OpenRouter/litellm) | all reasoning/codegen | `oai/backend/litellm.py` (`LiteLLMAPIBackend` default) | `LLM_SETTINGS` (env, no prefix): `CHAT_MODEL`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, `BACKEND` | retry `max_retry=10`, then `APIBackend` raises; timer counts API fails |
+| Embeddings (`EMBEDDING_MODEL`) | RAG/knowledge base, similarity ranking | same LiteLLM backend (`create_embedding`); required by CoSTEER V2 knowledge query | `LLM_SETTINGS.embedding_model` + the matching provider key | 10 retries then `RuntimeError`; **never** falls back silently |
 | Docker daemon | sandboxed code execution | `utils/env.py:DockerEnv` (docker SDK) | `DockerConf`, `DS_RD_SETTING.env_type` | `retry_count=5` then raise; `health_check -d` |
 | Conda | local env fallback | `LocalEnv` + `CondaConf` | `env_type="conda"` | name/version regex validation; `_prepare_conda_env` |
 | Kaggle API | competition data/submission | `scenarios/kaggle/kaggle_crawler.py`, `KaggleError` | `KG_AUTO_SUBMIT`, `local_data_path` | `KaggleError`; slug validated by `scenarios/kaggle/security.py` |
@@ -155,6 +156,8 @@ Competition name/URL → DataScienceScen (LLM-written description, timeouts, met
 | `BACKEND` | LLM backend class | `rdagent.oai.backend.LiteLLMAPIBackend` | No | `oai/llm_utils.get_api_backend` |
 | `CHAT_MODEL`,`EMBEDDING_MODEL` | model names | `gpt-4-turbo`, `text-embedding-3-small` | Yes for real runs | `LLM_SETTINGS` |
 | `OPENAI_API_KEY`/`OPENAI_API_BASE` (or `CHAT_*`/`EMBEDDING_*`) | credentials/endpoint | `""` | Yes (or Azure variants) | LiteLLM backend |
+| `OPENROUTER_API_KEY` with `openrouter/…` model ids | one credential covers chat **and** embeddings | unset | No | LiteLLM backend; `health_check.env_check` |
+| `EMBEDDING_MODEL` | embedding model (must match the key's provider) | `text-embedding-3-small` (needs `OPENAI_API_KEY`) | Yes when RAG runs | `APIBackend.create_embedding` |
 | `MAX_RETRY`,`RETRY_WAIT_SECONDS` | LLM retry policy | 10, 1 | No | `APIBackend._try_create_chat_completion_or_embedding` |
 | `USE_CHAT_CACHE`/`USE_EMBEDDING_CACHE` | prompt cache | False | No | `SQliteLazyCache` (`prompt_cache.db`) |
 | `DS_COMPETITION` | DS task | `""` (MLE default in main) | Yes for DS | `DataScienceRDLoop` |
@@ -272,6 +275,8 @@ CI (`.github/workflows/ci.yml`): matrix Python 3.10/3.11, `make dev` then `make 
 - **Logging**: always `from rdagent.log import rdagent_logger as logger`; structured objects via `logger.log_object(obj, tag=…)`; `logger.tag("Loop_x.step")` scoping.
 - **Errors**: raise from the `core/exception.py` taxonomy so the loop can classify (skip/withdraw).
 - **Formatting/lint**: black 120 cols, isort (black profile), ruff `select=ALL` with a long ignore list, toml-sort; pre-commit on push.
+- **⚠️ `pyproject.toml` sets `[tool.ruff] fix = true`**, so a bare `ruff check <file>` **rewrites the file in place**, including unrelated lines (it dropped an unused `import litellm` and de-quoted six `f""` literals in `app/utils/health_check.py`). Use `ruff check --no-fix` for inspection, and `git diff` after any `ruff check` to confirm the change surface.
+- **CI lints only `rdagent/core`** (`Makefile` `mypy`/`ruff` targets are scoped to it), so other packages carry pre-existing lint debt — e.g. `app/utils/health_check.py` has 41 ruff findings. Do not treat that debt as in-scope work.
 - **Tests**: pytest with `@pytest.mark.offline` for anything not touching LLMs/network/docker; `tmp_path` fixtures; security tests raise `ValueError(..., match=...)`.
 - **Prompts/templates**: `utils/agent/tpl.py` `T(".prompts:key.subkey").r(...)` reading YAML under the caller's package; scenario prompt packs (`share.yaml`, `prompts.yaml`, `prompts_v2.yaml`).
 - **Comments**: English with sporadic Chinese (e.g. `scenarios/data_science/dev/feedback.py`, `app/rl/loop.py`); `TODO(xxx)` attribution style.

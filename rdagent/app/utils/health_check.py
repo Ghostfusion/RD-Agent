@@ -110,6 +110,16 @@ def env_check():
             chat_api_base = os.getenv("OPENAI_API_BASE")
         else:
             chat_api_base = None
+    elif "OPENROUTER_API_KEY" in os.environ:
+        # OpenRouter serves both chat completions and embeddings behind the same
+        # credential, so one key covers both tests. `CHAT_MODEL`/`EMBEDDING_MODEL`
+        # must carry the `openrouter/` prefix (e.g. `openrouter/deepseek/deepseek-v4.1-flash`).
+        chat_api_key = os.getenv("OPENROUTER_API_KEY")
+        chat_model = os.getenv("CHAT_MODEL")
+        embedding_model = os.getenv("EMBEDDING_MODEL")
+        embedding_api_key = chat_api_key
+        chat_api_base = os.getenv("OPENAI_API_BASE")
+        embedding_api_base = chat_api_base
     elif "OPENAI_API_KEY" in os.environ:
         chat_api_key = os.getenv("OPENAI_API_KEY")
         chat_api_base = os.getenv("OPENAI_API_BASE")
@@ -119,6 +129,7 @@ def env_check():
         embedding_api_base = chat_api_base
     else:
         logger.error("No valid configuration was found, please check your .env file.")
+        return
 
     logger.info("🚀 Starting test...\n")
     result_embedding = test_embedding(
