@@ -343,6 +343,50 @@ CI (`.github/workflows/ci.yml`): matrix Python 3.10/3.11, `make dev` then `make 
 - **Always check the loop's failure taxonomy** before changing a step: exceptions are routed, not just propagated (`skip_loop_error` → jump to `record`; `withdraw_loop_error` → rollback + restart).
 - **Verification reality check**: this checkout has no dependencies installed and no `rdagent` package installed; `pytest -m offline` currently fails at import. Any future task must first install (`make dev` or `pip install -e .[test]`), and note the local interpreter (3.12) is outside the CI matrix (3.10/3.11).
 
+## 21. Sister Repository: `microsoft/qlib`
+
+`microsoft/qlib` (`pyqlib`) is the sister repository: the quant research platform
+that the `fin_factor` / `fin_model` / `fin_quant` / `fin_factor_report` scenarios
+drive. Local clone: `D:/Users/vince/PycharmProjects/qlib` (remote mirror
+`Ghostfusion/qlib`, HEAD `be725493`, 232 modules / 56,216 LOC, no tags).
+
+### The integration is deliberately out-of-process — do not vendor qlib code
+
+| Fact | Evidence |
+| --- | --- |
+| `pyqlib` is in **no** dependency file | absent from `requirements.txt`, `requirements/*.txt`, `constraints/*.txt`, `pyproject.toml` |
+| qlib is provisioned as a *runtime artifact*, not an import | `Makefile:65-67` (conda env `qlibRDAgent`, Python 3.8); `scenarios/qlib/docker/Dockerfile:13,17` (image `local_qlib:latest`); `utils/env.py:871` (pinned conda install) |
+| qlib is imported **only inside templates that execute inside the qlib env** | `scenarios/qlib/experiment/{factor_template,model_template}/read_exp_res.py` (`qlib.init()`, `from qlib.workflow import R`), `factor_data_template/generate.py` (`from qlib.data import D`), lazy import at `utils/qlib.py:190-191` |
+| `utils/qlib.py` holds only qlib **DSL expression strings** (`ALPHA20`, `ALPHA158`) and `validate_qlib_features()` — no qlib import at module scope | `utils/qlib.py:1-30` |
+| Other scenarios do not use qlib | `components/coder/factor_coder/eva_utils.py:394` parameterises `version: int = 1,  # 1 for qlib factors and 2 for kaggle factors` |
+
+Copying qlib source into `rdagent/` would duplicate a maintained upstream
+dependency that is already consumed as a pinned runtime artifact, and would break
+the isolation boundary that lets qlib run under Python 3.8 in its own
+env/container while the main package requires `>=3.10`.
+
+### Pin status (probed, verified)
+
+RD-Agent pins qlib at commit `2fb9380b342556ddb50a4b24e4fe8655d548b2b8`
+(2026-02-12) in two places: `scenarios/qlib/docker/Dockerfile:17` and
+`utils/env.py:871`.
+
+- The pin **exists**, is an **ancestor** of qlib `main`, and is **8 commits behind**.
+- Every qlib API RD-Agent depends on still exists at qlib `HEAD`: `qlib.init()`,
+  `R.list_experiments`, `R.list_recorders`, `R.get_recorder`,
+  `recorder.list_metrics`, `recorder.load_object`, `qlib.data.D`.
+- No commit in the 8-commit gap is a break/deprecate/remove/rename.
+- `3097dcc9 fix(security): use RestrictedUnpickler in load_instance (#2153)` landed
+  after the pin, but it changes `qlib/contrib/online/utils.py:21` only — **not** on
+  RD-Agent's call path (`recorder.load_object` is in `qlib/workflow/`). It is
+  therefore not an exposure for this project.
+
+**Conclusion of the probe: no qlib code is importable into this project, and no
+defect exists in the qlib integration. No change was made. The pin bump is an
+owner decision, not a defect fix** (it alters a deliberate reproducibility pin and
+requires a `local_qlib:latest` rebuild plus a CN-data smoke run to validate, which
+is not possible in a checkout with no installed dependencies).
+
 ---
 
 # Working Agreement
@@ -371,3 +415,5 @@ Owner decision required before any fix.
 | `docs/conf.py` runs `git describe --tags --abbrev=0`, which fails in a clone with no tags, so `make docs-gen` cannot build. | `docs/conf.py:13`; `git tag` is empty in this clone while `Makefile docs-gen` runs sphinx with `-W`. | Not part of the current change; upstream-identical code. Deferral pending owner decision. |
 | `rdagent kaggle --competition …` is documented as the recommended command but no `kaggle` command is registered in the CLI. | `rdagent/app/data_science/loop.py:59`, `rdagent/app/kaggle/loop.py:120` vs. command registration in `rdagent/app/cli.py:82-199`. | Documentation/implementation mismatch outside this change's surface. |
 | `pyproject.toml` sets coverage `fail_under = 80` while `Makefile test` overrides it to `--fail-under 20`. | `pyproject.toml` `[tool.coverage.report]`; `Makefile` test/test-offline targets. | Pre-existing inconsistency; owner decision on which threshold is authoritative. |
+| The qlib pin `2fb9380b` (2026-02-12) is 8 commits behind qlib `main`; the gap contains a security fix (`#2153`). | `scenarios/qlib/docker/Dockerfile:17`, `utils/env.py:871`; probe results in §21. | Not a defect: every API RD-Agent calls is unchanged, and the security commit touches `qlib/contrib/online/utils.py`, which is not on RD-Agent's call path. Bumping the pin alters a deliberate reproducibility pin and needs a `local_qlib:latest` rebuild to validate — owner decision. |
+| Agent-onboarding document differs from the sister repo's convention: `docs/agent_onboarding.md` (lowercase, in `docs/`) vs `qlib/AGENT_ONBOARDING.md` (uppercase, repo root). | This file; `D:/Users/vince/PycharmProjects/qlib/AGENT_ONBOARDING.md`. | Cosmetic convention mismatch, not a defect. `.gitignore` ignores `AGENTS.md` but not `AGENT_ONBOARDING.md`, so root placement is available if the owner wants the two repos aligned. |
